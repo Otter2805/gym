@@ -35,10 +35,14 @@ def seed_exercises():
         ('face_pull', 'Shoulders'),
         ('rear_delt_flys', 'Shoulders'),
         # Arms
-        ('bicep_curl', 'Arms'),
-        ('tricep_pushdown', 'Arms'),
-        ('skullcrusher', 'Arms'),
-        ('hammer_curl', 'Arms'),
+        ('bicep_curl', 'Bicep'),
+        ('preacher_curl', 'Bicep'),
+        ('incline curl', 'Bicep'),
+        ('barbell curl', 'Bicep'),
+        ('tricep_pushdown', 'Tricep'),
+        ('skullcrusher', 'Tricep'),
+        ('close_grip_bench_press', 'Tricep'),
+        ('hammer_curl', 'Bicep'),
         # Core
         ('plank', 'Core'),
         ('hanging_leg_raise', 'Core')
@@ -124,6 +128,7 @@ def init_db():
                 FOREIGN KEY (exercise_id) REFERENCES exercises (id)
             )
         """)
+        seed_exercises()
 
 # Helper to check for active sessions
 def get_active_session(user_id):

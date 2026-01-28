@@ -147,67 +147,151 @@ class Workout(commands.Cog):
 
     @commands.command()
     async def history(self, ctx, limit: int = 5):
-        if self.is_sync(ctx): return # Never show history during a sync boot
+        if self.is_sync(ctx): return 
+        
+        user_id = ctx.author.id # Filter by who is asking
 
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT exercise, weight, reps, timestamp FROM logs ORDER BY id DESC LIMIT ?", (limit,))
+            # Only select YOUR logs
+            cursor.execute("""
+                SELECT exercise, weight, reps, timestamp 
+                FROM logs 
+                WHERE user_id = ? 
+                ORDER BY id DESC LIMIT ?
+            """, (user_id, limit))
             rows = cursor.fetchall()
 
         if not rows:
-            await ctx.send("📭 Database is empty.")
+            await ctx.send("📭 You haven't logged any lifts yet.")
             return
 
-        msg = "**📊 Recent Lifts (kg):**\n"
+        msg = f"**📊 Your Recent Lifts (kg):**\n"
         for row in rows:
+            # row[3] is the timestamp
             time_part = row[3].split('T')[1][:5] if 'T' in row[3] else "N/A"
-            msg += f"`{time_part}` | **{row[0].capitalize()}**: {row[1]}kg x {row[2]}\n"
+            msg += f"`{time_part}` | **{row[0].replace('_', ' ').capitalize()}**: {row[1]}kg x {row[2]}\n"
         await ctx.send(msg)
 
     @commands.command()
     async def finish(self, ctx):
         user_id = ctx.author.id
         session = db.get_active_session(user_id)
-        
-        if not session:
-            if not self.is_sync(ctx): await ctx.send("❌ No active session found.")
-            return
+        if not session: return await ctx.send("❌ No active session.")
 
-        end_time = ctx.message.created_at.isoformat()
+        session_id, split_name = session
         
         with db.get_connection() as conn:
-            # Calculate tonnage for this user's session
-            tonnage = conn.execute("SELECT SUM(weight * reps) FROM logs WHERE session_id = ?", (session[0],)).fetchone()[0] or 0
-            conn.execute("UPDATE sessions SET end_time = ?, status = 'COMPLETED' WHERE id = ?", (end_time, session[0]))
+            # 1. Get all logs for current session
+            current_logs = conn.execute("""
+                SELECT exercise, weight, reps 
+                FROM logs WHERE session_id = ?
+            """, (session_id,)).fetchall()
 
-        if not self.is_sync(ctx):
-            await ctx.send(f"🏁 **Session Finished!** Total Volume: {tonnage:.2f}kg.")
+            # 2. Find previous completed session of same split
+            prev_session = conn.execute("""
+                SELECT id FROM sessions 
+                WHERE user_id = ? AND split_name = ? AND status = 'COMPLETED' 
+                ORDER BY id DESC LIMIT 1
+            """, (user_id, split_name)).fetchone()
+
+            analysis_rows = []
+            exercises_done = sorted(list(set([log[0] for log in current_logs])))
+
+            for ex in exercises_done:
+                # --- PROCESS CURRENT SESSION ---
+                # Calculate e1RM for all sets of this exercise
+                curr_sets = [{'w': l[1], 'r': l[2], 'e': l[1] / (1.0278 - (0.0278 * l[2]))} 
+                             for l in current_logs if l[0] == ex]
+                
+                max_weight = max(s['w'] for s in curr_sets)
+                # FILTER: Only sets >= 80% of max weight (The "Working Sets")
+                working_sets = [s['e'] for s in curr_sets if s['w'] >= (max_weight * 0.8)]
+                curr_rsi = sum(working_sets) / len(working_sets)
+
+                # --- PROCESS PREVIOUS SESSION ---
+                prev_rsi = 0
+                if prev_session:
+                    prev_logs = conn.execute("""
+                        SELECT weight, reps FROM logs 
+                        WHERE session_id = ? AND exercise = ?
+                    """, (prev_session[0], ex)).fetchall()
+                    
+                    if prev_logs:
+                        p_sets = [{'w': l[0], 'r': l[1], 'e': l[0] / (1.0278 - (0.0278 * l[1]))} 
+                                  for l in prev_logs]
+                        p_max = max(s['w'] for s in p_sets)
+                        p_working = [s['e'] for s in p_sets if s['w'] >= (p_max * 0.8)]
+                        prev_rsi = sum(p_working) / len(p_working)
+
+                analysis_rows.append({
+                    'name': ex.replace('_', ' ').capitalize(),
+                    'change': (curr_rsi - prev_rsi) if prev_rsi > 0 else None
+                })
+
+            # 3. Close the session
+            conn.execute("UPDATE sessions SET end_time = ?, status = 'COMPLETED' WHERE id = ?", 
+                         (ctx.message.created_at.isoformat(), session_id))
+
+        # --- Output Table ---
+        msg = f"🏁 **{split_name.upper()} Complete**\n"
+        msg += "```\nExercise         | Strength Change\n"
+        msg += "----------------------------------\n"
+        
+        for row in analysis_rows:
+            name = (row['name'][:15] + '..') if len(row['name']) > 15 else row['name'].ljust(16)
+            if row['change'] is None:
+                change_str = "Baseline"
+            else:
+                emoji = "▲" if row['change'] >= 0 else "▼"
+                change_str = f"{emoji} {abs(row['change']):.1f} kg"
+            
+            msg += f"{name} | {change_str}\n"
+        
+        msg += "```"
+        await ctx.send(msg)
 
     @commands.command()
     async def set_split(self, ctx, *, content: str):
-        """Format: !set_split Push, Bench, OHP, Triceps"""
+        """Format: !set_split Push1, Bench, OHP, Triceps"""
         parts = [p.strip().lower() for p in content.split(',')]
         if len(parts) < 2:
             await ctx.send("❓ Need a name and at least one exercise. e.g., `!set_split Push, Bench, OHP`")
             return
 
         split_name = parts[0]
-        exercises = parts[1:]
+        raw_exercises = parts[1:]
         user_id = ctx.author.id
+        
+        validated_exercises = []
+        errors = []
 
+        # 1. Validate each exercise against the Master List/Aliases
+        for ex in raw_exercises:
+            resolved = db.resolve_exercise(ex)
+            if resolved:
+                validated_exercises.append(resolved)
+            else:
+                errors.append(ex)
+
+        # 2. If there are typos, stop here and tell the user
+        if errors:
+            error_list = ", ".join([f"`{e}`" for e in errors])
+            await ctx.send(f"❌ **Split not saved.** The following exercises are not recognized: {error_list}\n"
+                        f"Please add them with `!new_ex` or `!alias` first.")
+            return
+
+        # 3. Save the clean, standardized exercises
         with db.get_connection() as conn:
-            # Clear old version of this split for the user
             conn.execute("DELETE FROM user_splits WHERE user_id = ? AND split_name = ?", (user_id, split_name))
             
-            # Insert new exercises
-            for index, ex in enumerate(exercises):
+            for index, ex_name in enumerate(validated_exercises):
                 conn.execute("""
                     INSERT INTO user_splits (user_id, split_name, exercise_name, order_index)
                     VALUES (?, ?, ?, ?)
-                """, (user_id, split_name, ex, index))
+                """, (user_id, split_name, ex_name, index))
 
-        await ctx.send(f"✅ **{split_name.capitalize()}** split saved with {len(exercises)} exercises.")
-
+        await ctx.send(f"✅ **{split_name.capitalize()}** saved with {len(validated_exercises)} validated exercises.")
 
     @commands.command()
     async def new_ex(self, ctx, name: str, category: str):
