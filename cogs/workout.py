@@ -78,39 +78,57 @@ class Workout(commands.Cog):
 
     @commands.command()
     async def log(self, ctx, *, content: str):
+        # 1. Metadata Capture
         user_id = ctx.author.id
-        msg_ts = ctx.message.created_at.isoformat()
+        msg_ts = ctx.message.created_at.isoformat() # Perfect for your Brussels/UTC sync
         
-        # 1. Get THIS user's active session
+        # 2. Session Check (Isolated by User)
         session = db.get_active_session(user_id)
-        
         if not session:
             if not self.is_sync(ctx):
-                await ctx.send("❌ You don't have an active session. Type `!start [split]` first.")
+                await ctx.send("❌ You don't have an active session! Type `!start <split>` first.")
             return
 
         session_id = session[0]
 
-        # 2. Parse the lift
-        pattern = r"([a-zA-Z_]+)\s+(\d+(?:\.\d+)?)\s+(\d+)(?:\s+@(\d+))?"
+        # 3. Regex Parsing (exercise weight reps @rpe)
+        # This handles decimals for weight (kg) and optional @RPE
+        pattern = r"([a-zA-Z0-9_]+)\s+(\d+(?:\.\d+)?)\s+(\d+)(?:\s+@(\d+))?"
         match = re.search(pattern, content)
         
-        if match:
-            name, weight, reps, rpe = match.groups()
-            rpe = rpe if rpe else "N/A"
-            
-            with db.get_connection() as conn:
-                conn.execute("""
-                    INSERT INTO logs (session_id, user_id, exercise, weight, reps, rpe, timestamp) 
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (session_id, user_id, name.lower(), float(weight), int(reps), rpe, msg_ts))
-            
+        if not match:
             if not self.is_sync(ctx):
-                # Quick 1RM calculation for the flex
-                one_rm = float(weight) / (1.0278 - (0.0278 * int(reps)))
-                await ctx.send(f"✅ **{name.capitalize()}**: {weight}kg x {reps} (@{rpe}). 1RM: {round(one_rm)}kg")
-        elif not self.is_sync(ctx):
-            await ctx.send("❓ Format: `exercise weight reps @rpe` (e.g., `bench 100 5 @8`)")
+                await ctx.send("❓ Format error! Use: `exercise weight reps @rpe` (e.g., `bench 80 5 @8`)")
+            return
+
+        raw_name, weight, reps, rpe = match.groups()
+        rpe_val = rpe if rpe else "N/A"
+
+        # 4. Exercise Resolution (The "Bouncer")
+        # This checks your master list and alias table
+        exercise_name = db.resolve_exercise(raw_name)
+        
+        if not exercise_name:
+            if not self.is_sync(ctx):
+                await ctx.send(
+                    f"⚠️ Exercise `{raw_name}` is not in the system.\n"
+                    f"• To add: `!new_ex {raw_name} <category>`\n"
+                    f"• To alias: `!alias {raw_name} <master_name>`"
+                )
+            return
+
+        # 5. Database Injection
+        with db.get_connection() as conn:
+            conn.execute("""
+                INSERT INTO logs (session_id, user_id, exercise, weight, reps, rpe, timestamp) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (session_id, user_id, exercise_name, float(weight), int(reps), rpe_val, msg_ts))
+
+        # 6. User Feedback
+        if not self.is_sync(ctx):
+            # Using the standard name here ensures feedback is always clean
+            clean_name = exercise_name.replace('_', ' ').capitalize()
+            await ctx.send(f"✅ **{clean_name}**: {weight}kg x {reps} (RPE: {rpe_val})")
 
     @commands.command()
     async def status(self, ctx, sleep: int = None, fatigue: int = None):
@@ -189,6 +207,52 @@ class Workout(commands.Cog):
                 """, (user_id, split_name, ex, index))
 
         await ctx.send(f"✅ **{split_name.capitalize()}** split saved with {len(exercises)} exercises.")
+
+
+    @commands.command()
+    async def new_ex(self, ctx, name: str, category: str):
+        """Usage: !new_ex bench_press Chest"""
+        name = name.lower().strip()
+        try:
+            with db.get_connection() as conn:
+                conn.execute("INSERT INTO exercises (name, category) VALUES (?, ?)", (name, category.capitalize()))
+            await ctx.send(f"✅ Master exercise `{name}` added to `{category}`.")
+        except:
+            await ctx.send(f"⚠️ Exercise `{name}` already exists.")
+
+    @commands.command()
+    async def alias(self, ctx, shorthand: str, master_name: str):
+        """Usage: !alias bp bench_press"""
+        shorthand = shorthand.lower().strip()
+        master_name = master_name.lower().strip()
+
+        with db.get_connection() as conn:
+            ex = conn.execute("SELECT id FROM exercises WHERE name = ?", (master_name,)).fetchone()
+            if not ex:
+                await ctx.send(f"❌ Master exercise `{master_name}` doesn't exist.")
+                return
+            conn.execute("INSERT OR REPLACE INTO exercise_aliases (alias, exercise_id) VALUES (?, ?)", 
+                         (shorthand, ex[0]))
+        await ctx.send(f"✅ Alias mapped: `{shorthand}` ➡️ `{master_name}`")
+
+    @commands.command()
+    async def list_ex(self, ctx):
+        """Lists all known exercises by category"""
+        with db.get_connection() as conn:
+            data = conn.execute("SELECT name, category FROM exercises ORDER BY category").fetchall()
+        
+        if not data:
+            await ctx.send("📭 No exercises in database.")
+            return
+
+        msg = "**📚 Known Exercises:**\n"
+        current_cat = ""
+        for name, cat in data:
+            if cat != current_cat:
+                msg += f"\n**{cat}:**\n"
+                current_cat = cat
+            msg += f"• `{name}`\n"
+        await ctx.send(msg)
 
 async def setup(bot):
     await bot.add_cog(Workout(bot))
