@@ -20,31 +20,54 @@ def get_last_log_timestamp():
 
 def init_db():
     with get_connection() as conn:
-        cursor = conn.cursor()
-        # Sessions: Now with optional metadata columns
-        cursor.execute('''CREATE TABLE IF NOT EXISTS sessions 
-            (id INTEGER PRIMARY KEY, 
-             start_time TEXT, 
-             end_time TEXT, 
-             status TEXT,
-             sleep_score INTEGER,
-             fatigue_level INTEGER)''')
+        # 1. Training Splits (The Plan)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_splits (
+                user_id INTEGER,
+                split_name TEXT, -- 'push', 'pull', 'legs'
+                exercise_name TEXT,
+                order_index INTEGER, -- To keep exercises in order
+                PRIMARY KEY (user_id, split_name, exercise_name)
+            )
+        """)
         
-        # Logs: Individual sets
-        cursor.execute('''CREATE TABLE IF NOT EXISTS logs 
-            (id INTEGER PRIMARY KEY, 
-             session_id INTEGER, 
-             exercise TEXT, 
-             weight REAL, 
-             reps INTEGER, 
-             rpe TEXT, 
-             timestamp TEXT,
-             FOREIGN KEY (session_id) REFERENCES sessions(id))''')
-        conn.commit()
+        # 2. Sessions (The Workout)
+        # Part of database.py init_db
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                start_time TEXT,
+                end_time TEXT,
+                split_name TEXT,
+                status TEXT,
+                sleep_score INTEGER,
+                fatigue_level INTEGER
+           )
+        """)
+
+        # 3. Logs (The Lifts)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER,
+                user_id INTEGER,
+                exercise TEXT,
+                weight REAL,
+                reps INTEGER,
+                rpe INTEGER,
+                timestamp TEXT,
+                FOREIGN KEY (session_id) REFERENCES sessions (id)
+            )
+        """)
 
 # Helper to check for active sessions
-def get_active_session():
+def get_active_session(user_id):
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, start_time FROM sessions WHERE status = 'ACTIVE'")
+        # Find the active session belonging specifically to this user
+        cursor.execute("""
+            SELECT id, split_name FROM sessions 
+            WHERE user_id = ? AND status = 'ACTIVE'
+        """, (user_id,))
         return cursor.fetchone()
