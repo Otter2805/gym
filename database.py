@@ -72,9 +72,9 @@ def init_db():
         conn.execute("""
             CREATE TABLE IF NOT EXISTS user_splits (
                 user_id INTEGER,
-                split_name TEXT, -- 'push', 'pull', 'legs'
+                split_name TEXT,
                 exercise_name TEXT,
-                order_index INTEGER, -- To keep exercises in order
+                order_index INTEGER,
                 PRIMARY KEY (user_id, split_name, exercise_name)
             )
         """)
