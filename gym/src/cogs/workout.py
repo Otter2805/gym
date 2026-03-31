@@ -272,6 +272,8 @@ class Workout(commands.Cog):
                     INSERT INTO user_splits (user_id, split_name, exercise_name, order_index)
                     VALUES (?, ?, ?, ?)
                 """, (user_id, split_name, ex_name, index))
+        # this is needed so data is instantly written to db
+        conn.close()
 
         await ctx.send(f"**{split_name.capitalize()}** saved with {len(validated_exercises)} validated exercises.")
 
