@@ -1,7 +1,7 @@
 import sqlite3
 import os
+from datetime import datetime, timezone
 
-# use an absolute path so the DB file is always in the same place regardless of where you start the bot from
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'gym_database', 'gym_data.db')
 
@@ -11,7 +11,6 @@ def get_connection():
     immediately rather than using a sidecar -wal file.
     """
     conn = sqlite3.connect(DB_PATH)
-    # ournal_mode=DELETE ensures data goes straight to gym_data.db
     conn.execute("PRAGMA journal_mode=DELETE;")
     conn.execute("PRAGMA synchronous=FULL;")
     return conn
@@ -77,33 +76,36 @@ def init_db():
                     FOREIGN KEY (exercise_id) REFERENCES exercises (id)
                 )
             """)
-        seed_exercises()
+
+            # 6. Heartbeat Metadata
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS bot_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+            
+            initial_time = datetime.now(timezone.utc).isoformat()
+            conn.execute("INSERT OR IGNORE INTO bot_metadata (key, value) VALUES ('last_heartbeat', ?)", 
+                         (initial_time,))
     finally:
         conn.close()
 
-def seed_exercises():
-    exercises = [
-        ('bench_press', 'Chest'), ('incline_db_press', 'Chest'), ('chest_fly', 'Chest'),
-        ('dip', 'Chest'), ('incline_smith_bench', 'Chest'), ('deadlift', 'Back'),
-        ('pull_up', 'Back'), ('lat_pulldown', 'Back'), ('bent_over_barbell_row', 'Back'),
-        ('seated_cable_row', 'Back'), ('chest_supported_row', 'Back'), ('iso_lat_pulldown', 'Back'),
-        ('squat', 'Legs'), ('leg_press', 'Legs'), ('leg_extension', 'Legs'),
-        ('leg_curl', 'Legs'), ('romanian_deadlift', 'Legs'), ('calf_raise', 'Legs'),
-        ('barbell_overhead_press', 'Shoulders'), ('db_overhead_press', 'Shoulders'),
-        ('db_lat_raise', 'Shoulders'), ('cable_lat_raise', 'Shoulders'), ('face_pull', 'Shoulders'),
-        ('rear_delt_flys', 'Shoulders'), ('bicep_curl', 'Bicep'), ('preacher_curl', 'Bicep'),
-        ('incline_curl', 'Bicep'), ('barbell_curl', 'Bicep'), ('tricep_pushdown', 'Tricep'),
-        ('skullcrusher', 'Tricep'), ('close_grip_bench_press', 'Tricep'), ('hammer_curl', 'Bicep'),
-        ('plank', 'Core'), ('hanging_leg_raise', 'Core')
-    ]
-    
+def update_heartbeat(timestamp):
+    """Updates the global 'last seen' time for the bot."""
     conn = get_connection()
     try:
         with conn:
-            conn.executemany(
-                "INSERT OR IGNORE INTO exercises (name, category) VALUES (?, ?)", 
-                exercises
-            )
+            conn.execute("UPDATE bot_metadata SET value = ? WHERE key = 'last_heartbeat'", (timestamp,))
+    finally:
+        conn.close()
+
+def get_heartbeat():
+    """Retrieves the last time the bot successfully processed a command."""
+    conn = get_connection()
+    try:
+        res = conn.execute("SELECT value FROM bot_metadata WHERE key = 'last_heartbeat'").fetchone()
+        return res[0] if res else None
     finally:
         conn.close()
 
@@ -139,16 +141,28 @@ def resolve_exercise(input_name):
     finally:
         conn.close()
 
-def get_last_log_timestamp():
+def seed_exercises():
+    exercises = [
+        ('bench_press', 'Chest'), ('incline_db_press', 'Chest'), ('chest_fly', 'Chest'),
+        ('dip', 'Chest'), ('incline_smith_bench', 'Chest'), ('deadlift', 'Back'),
+        ('pull_up', 'Back'), ('lat_pulldown', 'Back'), ('bent_over_barbell_row', 'Back'),
+        ('seated_cable_row', 'Back'), ('chest_supported_row', 'Back'), ('iso_lat_pulldown', 'Back'),
+        ('squat', 'Legs'), ('leg_press', 'Legs'), ('leg_extension', 'Legs'),
+        ('leg_curl', 'Legs'), ('romanian_deadlift', 'Legs'), ('calf_raise', 'Legs'),
+        ('barbell_overhead_press', 'Shoulders'), ('db_overhead_press', 'Shoulders'),
+        ('db_lat_raise', 'Shoulders'), ('cable_lat_raise', 'Shoulders'), ('face_pull', 'Shoulders'),
+        ('rear_delt_flys', 'Shoulders'), ('bicep_curl', 'Bicep'), ('preacher_curl', 'Bicep'),
+        ('incline_curl', 'Bicep'), ('barbell_curl', 'Bicep'), ('tricep_pushdown', 'Tricep'),
+        ('skullcrusher', 'Tricep'), ('close_grip_bench_press', 'Tricep'), ('hammer_curl', 'Bicep'),
+        ('plank', 'Core'), ('hanging_leg_raise', 'Core')
+    ]
+    
     conn = get_connection()
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT timestamp FROM logs ORDER BY id DESC LIMIT 1")
-        res = cursor.fetchone()
-        if res: return res[0]
-        
-        cursor.execute("SELECT start_time FROM sessions ORDER BY id DESC LIMIT 1")
-        res = cursor.fetchone()
-        return res[0] if res else None
+        with conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO exercises (name, category) VALUES (?, ?)", 
+                exercises
+            )
     finally:
         conn.close()

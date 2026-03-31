@@ -25,10 +25,15 @@ class GymBot(commands.Bot):
 bot = GymBot()
 
 @bot.event
+async def on_command_completion(ctx):
+    now_ts = ctx.message.created_at.replace(tzinfo=timezone.utc).isoformat()
+    database.update_heartbeat(now_ts)
+
+@bot.event
 async def on_ready():
     print(f'{bot.user.name} is online. Starting Sync...')
-    last_ts = database.get_last_log_timestamp()
-    channel = bot.get_channel(1465795764386267404) 
+    last_ts = database.get_heartbeat()
+    channel = bot.get_channel(1465795764386267404)
     
     if last_ts and channel:
         last_dt = datetime.fromisoformat(last_ts).replace(tzinfo=timezone.utc)
