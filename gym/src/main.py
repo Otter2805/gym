@@ -35,7 +35,6 @@ async def on_ready():
         
         print(f"Checking messages after {last_dt}")
 
-        # 2. Fetch messages from Discord since last_dt
         async for message in channel.history(after=last_dt, oldest_first=True):
             if message.author == bot.user:
                 continue

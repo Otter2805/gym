@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 import database as db
 
 class Workout(commands.Cog):
@@ -16,7 +16,7 @@ class Workout(commands.Cog):
     async def start(self, ctx, split_name: str):
         user_id = ctx.author.id
         split_name = split_name.lower()
-        start_time = ctx.message.created_at.isoformat()
+        start_time = ctx.message.created_at.replace(tzinfo=timezone.utc).isoformat()
 
         with db.get_connection() as conn:
             active = conn.execute("SELECT id FROM sessions WHERE user_id = ? AND status = 'ACTIVE'", (user_id,)).fetchone()
@@ -76,7 +76,7 @@ class Workout(commands.Cog):
     @commands.command()
     async def log(self, ctx, *, content: str):
         user_id = ctx.author.id 
-        msg_ts = ctx.message.created_at.isoformat()
+        msg_ts = ctx.message.created_at.replace(tzinfo=timezone.utc).isoformat()
         
         # Session Check (Isolated by user)
         session = db.get_active_session(user_id)
@@ -123,7 +123,8 @@ class Workout(commands.Cog):
 
     @commands.command()
     async def status(self, ctx, sleep: int = None, fatigue: int = None):
-        session = db.get_active_session()
+        user_id = ctx.author.id
+        session = db.get_active_session(user_id)
         if not session:
             if not self.is_sync(ctx):
                 await ctx.send("No active session found.")
@@ -213,8 +214,9 @@ class Workout(commands.Cog):
                 })
 
             # Close the session
+            end_time = ctx.message.created_at.replace(tzinfo=timezone.utc).isoformat()
             conn.execute("UPDATE sessions SET end_time = ?, status = 'COMPLETED' WHERE id = ?", 
-                         (ctx.message.created_at.isoformat(), session_id))
+                (end_time, session_id))
 
         # --- Output Table ---
         msg = f" **{split_name.upper()} Complete**\n"

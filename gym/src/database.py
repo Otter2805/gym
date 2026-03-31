@@ -1,6 +1,5 @@
 import sqlite3
 import os
-from datetime import datetime
 
 # use an absolute path so the DB file is always in the same place regardless of where you start the bot from
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
