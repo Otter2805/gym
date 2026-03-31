@@ -187,17 +187,12 @@ class Workout(commands.Cog):
             exercises_done = sorted(list(set([log[0] for log in current_logs])))
 
             for ex in exercises_done:
-                # --- PROCESS CURRENT SESSION ---
-                # Calculate e1RM for all sets of this exercise
                 curr_sets = [{'w': l[1], 'r': l[2], 'e': l[1] / (1.0278 - (0.0278 * l[2]))} 
                              for l in current_logs if l[0] == ex]
                 
                 max_weight = max(s['w'] for s in curr_sets)
-                # FILTER: Only sets >= 80% of max weight (The "Working Sets")
                 working_sets = [s['e'] for s in curr_sets if s['w'] >= (max_weight * 0.8)]
                 curr_rsi = sum(working_sets) / len(working_sets)
-
-                # --- PROCESS PREVIOUS SESSION ---
                 prev_rsi = 0
                 if prev_session:
                     prev_logs = conn.execute("""

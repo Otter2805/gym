@@ -1,14 +1,10 @@
-# Python environment
 venv/
 __pycache__/
 *.py[cod]
 
-# Secret Bot Tokens
 .env
 
-# Local Database (Your data stays local, not in Git)
 *.db
 
-# OS specific
 .DS_Store
 Thumbs.db

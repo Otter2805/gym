@@ -54,13 +54,11 @@ def seed_exercises():
             "INSERT OR IGNORE INTO exercises (name, category) VALUES (?, ?)", 
             exercises
         )
-    print(f"✅ Seeded {len(exercises)} master exercises.")
+    print(f"Seeded {len(exercises)} master exercises.")
 
 def get_connection():
-    # 2. Get the folder name from the path
     db_dir = os.path.dirname(DB_PATH)
-    
-    # 3. If there is a folder in the path and it doesn't exist, make it
+
     if db_dir and not os.path.exists(db_dir):
         os.makedirs(db_dir, exist_ok=True)
     return sqlite3.connect(DB_PATH)
@@ -90,8 +88,6 @@ def init_db():
             )
         """)
         
-        # 2. Sessions (The Workout)
-        # Part of database.py init_db
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,8 +100,6 @@ def init_db():
                 fatigue_level INTEGER
            )
         """)
-
-        # 3. Logs (The Lifts)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,11 +131,9 @@ def init_db():
         """)
         seed_exercises()
 
-# Helper to check for active sessions
 def get_active_session(user_id):
     with get_connection() as conn:
         cursor = conn.cursor()
-        # Find the active session belonging specifically to this user
         cursor.execute("""
             SELECT id, split_name FROM sessions 
             WHERE user_id = ? AND status = 'ACTIVE'
@@ -151,12 +143,10 @@ def get_active_session(user_id):
 def resolve_exercise(input_name):
     name = input_name.lower().strip()
     with get_connection() as conn:
-        # 1. Check if it's already a master name
         res = conn.execute("SELECT name FROM exercises WHERE name = ?", (name,)).fetchone()
         if res:
             return res[0]
-        
-        # 2. Check if it's a known alias
+
         res = conn.execute("""
             SELECT e.name FROM exercises e
             JOIN exercise_aliases a ON e.id = a.exercise_id
