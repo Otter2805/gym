@@ -32,17 +32,17 @@ class Workout(commands.Cog):
 
             if not exercises:
                 if not self.is_sync(ctx): 
-                    await ctx.send(f"❓ No split named `{split_name}` found. Use `!set_split` first!")
+                    await ctx.send(f"No split named `{split_name}` found. Use `!set_split` first!")
                 return
 
-            # find the ID of the PREVIOUS session of the same name
+            # find the ID of the previous session of the same name
             last_session = conn.execute("""
                 SELECT id FROM sessions 
                 WHERE user_id = ? AND split_name = ? AND status = 'COMPLETED'
                 ORDER BY id DESC LIMIT 1
             """, (user_id, split_name)).fetchone()
 
-            # Start the new session
+            # start the new session
             conn.execute("""
                 INSERT INTO sessions (user_id, start_time, split_name, status) 
                 VALUES (?, ?, ?, 'ACTIVE')
@@ -55,7 +55,7 @@ class Workout(commands.Cog):
                 last_id = last_session[0]
                 with db.get_connection() as conn:
                     for (ex_name,) in exercises:
-                        # Fetch ALL sets for this exercise from the last session
+                        # Fetch all sets for this exercise from the last session
                         sets = conn.execute("""
                             SELECT weight, reps, rpe FROM logs 
                             WHERE session_id = ? AND exercise = ? 
@@ -134,7 +134,7 @@ class Workout(commands.Cog):
                          (sleep, fatigue, session[0]))
             
         if not self.is_sync(ctx):
-            await ctx.send(f"📝 **Status Updated:** Sleep: {sleep if sleep else 'N/A'}, Fatigue: {fatigue if fatigue else 'N/A'}")
+            await ctx.send(f"**Status Updated:** Sleep: {sleep if sleep else 'N/A'}, Fatigue: {fatigue if fatigue else 'N/A'}")
 
     @commands.command()
     async def history(self, ctx, limit: int = 5):
@@ -156,7 +156,7 @@ class Workout(commands.Cog):
             await ctx.send("You haven't logged any lifts yet.")
             return
 
-        msg = f"**📊 Your Recent Lifts (kg):**\n"
+        msg = f"**Your Recent Lifts (kg):**\n"
         for row in rows:
             time_part = row[3].split('T')[1][:5] if 'T' in row[3] else "N/A"
             msg += f"`{time_part}` | **{row[0].replace('_', ' ').capitalize()}**: {row[1]}kg x {row[2]}\n"
@@ -299,13 +299,11 @@ class Workout(commands.Cog):
 
         try:
             with db.get_connection() as conn:
-                # 1. Check if the old name actually exists
                 res = conn.execute("SELECT id FROM exercises WHERE name = ?", (old_name,)).fetchone()
                 if not res:
                     await ctx.send(f"Could not find exercise `{old_name}`.")
                     return
 
-                # 2. Update all tables in one transaction
                 # Update master list
                 conn.execute("UPDATE exercises SET name = ? WHERE name = ?", (new_name, old_name))
                 # Update history
@@ -339,7 +337,7 @@ class Workout(commands.Cog):
             data = conn.execute("SELECT name, category FROM exercises ORDER BY category").fetchall()
         
         if not data:
-            await ctx.send("📭 No exercises in database.")
+            await ctx.send("No exercises in database.")
             return
 
         msg = "**Known Exercises:**\n"
@@ -350,6 +348,27 @@ class Workout(commands.Cog):
                 current_cat = cat
             msg += f"• `{name}`\n"
         await ctx.send(msg)
+
+    @commands.command()
+    async def list_splits(self, ctx):
+        """Lists all known splits per user"""
+        user_id = ctx.author.id
+        with db.get_connection() as conn:
+            data = conn.execute("SELECT split_name, exercise_name FROM user_splits WHERE user_id = ?", (user_id,)).fetchall()
+        
+        if not data:
+            await ctx.send("No splits in database.")
+            return
+
+        msg = "**Known splits:**\n"
+        current_split = ""
+        for split_name, exercise_name in data:
+            if split_name != current_split:
+                msg += f"\n**{split_name}:**\n"
+                current_split = split_name
+            msg += f"• `{exercise_name}`\n"
+        await ctx.send(msg)
+
 
 async def setup(bot):
     await bot.add_cog(Workout(bot))
