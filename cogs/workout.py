@@ -19,13 +19,11 @@ class Workout(commands.Cog):
         start_time = ctx.message.created_at.isoformat()
 
         with db.get_connection() as conn:
-            # 1. Active session check
             active = conn.execute("SELECT id FROM sessions WHERE user_id = ? AND status = 'ACTIVE'", (user_id,)).fetchone()
             if active:
-                if not self.is_sync(ctx): await ctx.send("⚠️ Finish your current workout first!")
+                if not self.is_sync(ctx): await ctx.send("Finish your current workout first!")
                 return
 
-            # 2. Get exercises for this template
             exercises = conn.execute("""
                 SELECT exercise_name FROM user_splits 
                 WHERE user_id = ? AND split_name = ? 
@@ -37,22 +35,21 @@ class Workout(commands.Cog):
                     await ctx.send(f"❓ No split named `{split_name}` found. Use `!set_split` first!")
                 return
 
-            # 3. Find the ID of the PREVIOUS session of the same name
+            # find the ID of the PREVIOUS session of the same name
             last_session = conn.execute("""
                 SELECT id FROM sessions 
                 WHERE user_id = ? AND split_name = ? AND status = 'COMPLETED'
                 ORDER BY id DESC LIMIT 1
             """, (user_id, split_name)).fetchone()
 
-            # 4. Start the new session
+            # Start the new session
             conn.execute("""
                 INSERT INTO sessions (user_id, start_time, split_name, status) 
                 VALUES (?, ?, ?, 'ACTIVE')
             """, (user_id, start_time, split_name))
 
-        # --- Data Retrieval & Formatting ---
         if not self.is_sync(ctx):
-            msg = f"🚀 **{split_name.upper()} Started!**\n\n**Targets from last session:**\n"
+            msg = f"**{split_name.upper()} Started!**\n\n**Targets from last session:**\n"
             
             if last_session:
                 last_id = last_session[0]
@@ -78,64 +75,58 @@ class Workout(commands.Cog):
 
     @commands.command()
     async def log(self, ctx, *, content: str):
-        # 1. Metadata Capture
-        user_id = ctx.author.id
-        msg_ts = ctx.message.created_at.isoformat() # Perfect for your Brussels/UTC sync
+        user_id = ctx.author.id 
+        msg_ts = ctx.message.created_at.isoformat()
         
-        # 2. Session Check (Isolated by User)
+        # Session Check (Isolated by user)
         session = db.get_active_session(user_id)
         if not session:
             if not self.is_sync(ctx):
-                await ctx.send("❌ You don't have an active session! Type `!start <split>` first.")
+                await ctx.send("You don't have an active session! Type `!start <split>` first.")
             return
 
         session_id = session[0]
 
-        # 3. Regex Parsing (exercise weight reps @rpe)
         # This handles decimals for weight (kg) and optional @RPE
         pattern = r"([a-zA-Z0-9_]+)\s+(\d+(?:\.\d+)?)\s+(\d+)(?:\s+@(\d+))?"
         match = re.search(pattern, content)
         
         if not match:
             if not self.is_sync(ctx):
-                await ctx.send("❓ Format error! Use: `exercise weight reps @rpe` (e.g., `bench 80 5 @8`)")
+                await ctx.send("Format error! Use: `exercise weight reps @rpe` (e.g., `bench 80 5 @8`)")
             return
 
         raw_name, weight, reps, rpe = match.groups()
         rpe_val = rpe if rpe else "N/A"
 
-        # 4. Exercise Resolution (The "Bouncer")
-        # This checks your master list and alias table
+        # This checks master list and alias table
         exercise_name = db.resolve_exercise(raw_name)
         
         if not exercise_name:
             if not self.is_sync(ctx):
                 await ctx.send(
-                    f"⚠️ Exercise `{raw_name}` is not in the system.\n"
+                    f"Exercise `{raw_name}` is not in the system.\n"
                     f"• To add: `!new_ex {raw_name} <category>`\n"
                     f"• To alias: `!alias {raw_name} <master_name>`"
                 )
             return
 
-        # 5. Database Injection
         with db.get_connection() as conn:
             conn.execute("""
                 INSERT INTO logs (session_id, user_id, exercise, weight, reps, rpe, timestamp) 
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (session_id, user_id, exercise_name, float(weight), int(reps), rpe_val, msg_ts))
 
-        # 6. User Feedback
         if not self.is_sync(ctx):
-            # Using the standard name here ensures feedback is always clean
             clean_name = exercise_name.replace('_', ' ').capitalize()
-            await ctx.send(f"✅ **{clean_name}**: {weight}kg x {reps} (RPE: {rpe_val})")
+            await ctx.send(f"**{clean_name}**: {weight}kg x {reps} (RPE: {rpe_val})")
 
     @commands.command()
     async def status(self, ctx, sleep: int = None, fatigue: int = None):
         session = db.get_active_session()
         if not session:
             if not self.is_sync(ctx):
-                await ctx.send("❌ No active session found.")
+                await ctx.send("No active session found.")
             return
 
         with db.get_connection() as conn:
@@ -149,11 +140,10 @@ class Workout(commands.Cog):
     async def history(self, ctx, limit: int = 5):
         if self.is_sync(ctx): return 
         
-        user_id = ctx.author.id # Filter by who is asking
+        user_id = ctx.author.id
 
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            # Only select YOUR logs
             cursor.execute("""
                 SELECT exercise, weight, reps, timestamp 
                 FROM logs 
@@ -163,12 +153,11 @@ class Workout(commands.Cog):
             rows = cursor.fetchall()
 
         if not rows:
-            await ctx.send("📭 You haven't logged any lifts yet.")
+            await ctx.send("You haven't logged any lifts yet.")
             return
 
         msg = f"**📊 Your Recent Lifts (kg):**\n"
         for row in rows:
-            # row[3] is the timestamp
             time_part = row[3].split('T')[1][:5] if 'T' in row[3] else "N/A"
             msg += f"`{time_part}` | **{row[0].replace('_', ' ').capitalize()}**: {row[1]}kg x {row[2]}\n"
         await ctx.send(msg)
@@ -177,18 +166,17 @@ class Workout(commands.Cog):
     async def finish(self, ctx):
         user_id = ctx.author.id
         session = db.get_active_session(user_id)
-        if not session: return await ctx.send("❌ No active session.")
+        if not session: return await ctx.send("No active session.")
 
         session_id, split_name = session
         
         with db.get_connection() as conn:
-            # 1. Get all logs for current session
             current_logs = conn.execute("""
                 SELECT exercise, weight, reps 
                 FROM logs WHERE session_id = ?
             """, (session_id,)).fetchall()
 
-            # 2. Find previous completed session of same split
+            # find previous completed session of same split
             prev_session = conn.execute("""
                 SELECT id FROM sessions 
                 WHERE user_id = ? AND split_name = ? AND status = 'COMPLETED' 
@@ -229,12 +217,12 @@ class Workout(commands.Cog):
                     'change': (curr_rsi - prev_rsi) if prev_rsi > 0 else None
                 })
 
-            # 3. Close the session
+            # Close the session
             conn.execute("UPDATE sessions SET end_time = ?, status = 'COMPLETED' WHERE id = ?", 
                          (ctx.message.created_at.isoformat(), session_id))
 
         # --- Output Table ---
-        msg = f"🏁 **{split_name.upper()} Complete**\n"
+        msg = f" **{split_name.upper()} Complete**\n"
         msg += "```\nExercise         | Strength Change\n"
         msg += "----------------------------------\n"
         
@@ -256,7 +244,7 @@ class Workout(commands.Cog):
         """Format: !set_split Push1, Bench, OHP, Triceps"""
         parts = [p.strip().lower() for p in content.split(',')]
         if len(parts) < 2:
-            await ctx.send("❓ Need a name and at least one exercise. e.g., `!set_split Push, Bench, OHP`")
+            await ctx.send("Need a name and at least one exercise. e.g., `!set_split Push, Bench, OHP`")
             return
 
         split_name = parts[0]
@@ -266,7 +254,7 @@ class Workout(commands.Cog):
         validated_exercises = []
         errors = []
 
-        # 1. Validate each exercise against the Master List/Aliases
+        # Validate each exercise against the Master List/Aliases
         for ex in raw_exercises:
             resolved = db.resolve_exercise(ex)
             if resolved:
@@ -274,14 +262,13 @@ class Workout(commands.Cog):
             else:
                 errors.append(ex)
 
-        # 2. If there are typos, stop here and tell the user
         if errors:
             error_list = ", ".join([f"`{e}`" for e in errors])
-            await ctx.send(f"❌ **Split not saved.** The following exercises are not recognized: {error_list}\n"
+            await ctx.send(f"**Split not saved.** The following exercises are not recognized: {error_list}\n"
                         f"Please add them with `!new_ex` or `!alias` first.")
             return
 
-        # 3. Save the clean, standardized exercises
+        # Save the standardized exercises
         with db.get_connection() as conn:
             conn.execute("DELETE FROM user_splits WHERE user_id = ? AND split_name = ?", (user_id, split_name))
             
@@ -291,7 +278,7 @@ class Workout(commands.Cog):
                     VALUES (?, ?, ?, ?)
                 """, (user_id, split_name, ex_name, index))
 
-        await ctx.send(f"✅ **{split_name.capitalize()}** saved with {len(validated_exercises)} validated exercises.")
+        await ctx.send(f"**{split_name.capitalize()}** saved with {len(validated_exercises)} validated exercises.")
 
     @commands.command()
     async def new_ex(self, ctx, name: str, category: str):
@@ -300,9 +287,35 @@ class Workout(commands.Cog):
         try:
             with db.get_connection() as conn:
                 conn.execute("INSERT INTO exercises (name, category) VALUES (?, ?)", (name, category.capitalize()))
-            await ctx.send(f"✅ Master exercise `{name}` added to `{category}`.")
+            await ctx.send(f"Master exercise `{name}` added to `{category}`.")
         except:
-            await ctx.send(f"⚠️ Exercise `{name}` already exists.")
+            await ctx.send(f"Exercise `{name}` already exists.")
+
+    @commands.command()
+    async def edit_ex(self, ctx, old_name: str, new_name: str):
+        """Usage: !edit_ex old_name new_name"""
+        old_name = old_name.lower().strip()
+        new_name = new_name.lower().strip()
+
+        try:
+            with db.get_connection() as conn:
+                # 1. Check if the old name actually exists
+                res = conn.execute("SELECT id FROM exercises WHERE name = ?", (old_name,)).fetchone()
+                if not res:
+                    await ctx.send(f"Could not find exercise `{old_name}`.")
+                    return
+
+                # 2. Update all tables in one transaction
+                # Update master list
+                conn.execute("UPDATE exercises SET name = ? WHERE name = ?", (new_name, old_name))
+                # Update history
+                conn.execute("UPDATE logs SET exercise = ? WHERE exercise = ?", (new_name, old_name))
+                # Update splits
+                conn.execute("UPDATE user_splits SET exercise_name = ? WHERE exercise_name = ?", (new_name, old_name))
+                
+            await ctx.send(f"Renamed `{old_name}` to `{new_name}` across all records.")
+        except Exception as e:
+            await ctx.send(f"Error: Could not rename. `{new_name}` might already exist.")
 
     @commands.command()
     async def alias(self, ctx, shorthand: str, master_name: str):
@@ -313,11 +326,11 @@ class Workout(commands.Cog):
         with db.get_connection() as conn:
             ex = conn.execute("SELECT id FROM exercises WHERE name = ?", (master_name,)).fetchone()
             if not ex:
-                await ctx.send(f"❌ Master exercise `{master_name}` doesn't exist.")
+                await ctx.send(f"Master exercise `{master_name}` doesn't exist.")
                 return
             conn.execute("INSERT OR REPLACE INTO exercise_aliases (alias, exercise_id) VALUES (?, ?)", 
                          (shorthand, ex[0]))
-        await ctx.send(f"✅ Alias mapped: `{shorthand}` ➡️ `{master_name}`")
+        await ctx.send(f"Alias mapped: `{shorthand}` ➡️ `{master_name}`")
 
     @commands.command()
     async def list_ex(self, ctx):
@@ -329,7 +342,7 @@ class Workout(commands.Cog):
             await ctx.send("📭 No exercises in database.")
             return
 
-        msg = "**📚 Known Exercises:**\n"
+        msg = "**Known Exercises:**\n"
         current_cat = ""
         for name, cat in data:
             if cat != current_cat:

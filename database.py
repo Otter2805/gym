@@ -1,7 +1,8 @@
 import sqlite3
 from datetime import datetime
+import os
 
-DB_PATH = 'gym_data.db'
+DB_PATH = os.getenv('DATABASE_URL', 'gym_data.db')
 
 def seed_exercises():
     exercises = [
@@ -37,8 +38,8 @@ def seed_exercises():
         # Arms
         ('bicep_curl', 'Bicep'),
         ('preacher_curl', 'Bicep'),
-        ('incline curl', 'Bicep'),
-        ('barbell curl', 'Bicep'),
+        ('incline_curl', 'Bicep'),
+        ('barbell_curl', 'Bicep'),
         ('tricep_pushdown', 'Tricep'),
         ('skullcrusher', 'Tricep'),
         ('close_grip_bench_press', 'Tricep'),
@@ -56,6 +57,12 @@ def seed_exercises():
     print(f"✅ Seeded {len(exercises)} master exercises.")
 
 def get_connection():
+    # 2. Get the folder name from the path
+    db_dir = os.path.dirname(DB_PATH)
+    
+    # 3. If there is a folder in the path and it doesn't exist, make it
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
     return sqlite3.connect(DB_PATH)
 
 def get_last_log_timestamp():
