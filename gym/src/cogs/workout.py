@@ -366,6 +366,35 @@ class Workout(commands.Cog):
             msg += f"• `{exercise_name}`\n"
         await ctx.send(msg)
 
+    @commands.command()
+    async def delete_split(self, ctx, split_name: str):
+        """Usage: !delete_split Push1"""
+        user_id = ctx.author.id
+        split_name = split_name.lower().strip()
+
+        conn = db.get_connection()
+        try:
+            with conn:
+                res = conn.execute(
+                    "SELECT COUNT(*) FROM user_splits WHERE user_id = ? AND split_name = ?", 
+                    (user_id, split_name)
+                ).fetchone()
+
+                if res[0] == 0:
+                    await ctx.send(f"No split named `{split_name}` found.")
+                    return
+
+                conn.execute(
+                    "DELETE FROM user_splits WHERE user_id = ? AND split_name = ?", 
+                    (user_id, split_name)
+                )
+            
+            await ctx.send(f"Successfully deleted the `{split_name}` split.")
+        except Exception as e:
+            await ctx.send(f"Error deleting split: {e}")
+        finally:
+            conn.close()
+
 
 async def setup(bot):
     await bot.add_cog(Workout(bot))
