@@ -63,3 +63,6 @@ The next evolution of this bot involves moving from data storage to intelligent 
     Natural Language Logging: Upgrading the !log command to use LLM parsing, allowing for messy inputs like "I did 3 sets of 10 on bench with 60kg and it felt like a 7 rpe."
 
     Personalized Programming: AI-generated splits based on the user's weak points identified in the strength change history.
+
+
+Docker command so volume is mapped correctly: docker run --env-file .env -v $(pwd)/gym/src/gym_database:/app/gym/src/gym_database gym
