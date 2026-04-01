@@ -47,7 +47,7 @@ async def on_ready():
             ctx = await bot.get_context(message)
             if ctx.valid:
                 print(f"Syncing: {message.content}")
-                ctx.from_sync = True # This keeps the bot silent during sync
+                ctx.from_sync = True
                 await bot.invoke(ctx)
 
     print("--- Sync Complete ---")

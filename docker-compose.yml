@@ -1,0 +1,23 @@
+services:
+  gym-bot:
+    build: .
+    container_name: gym_bot
+    restart: always
+    env_file: 
+      - .env
+    environment:
+      - OLLAMA_HOST=http://ai-engine:11434
+    depends_on:
+      - ai-engine
+
+  ai-engine:
+    image: ollama/ollama:latest
+    container_name: ai_engine
+    # this gives access to graphics
+    devices:
+      - /dev/dri:/dev/dri 
+    volumes:
+      - ollama_storage:/root/.ollama
+
+volumes:
+  ollama_storage:
